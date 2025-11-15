@@ -1,4 +1,4 @@
-name: "Universal Auto Release — Freeing-the-Lang v4.13"
+name: "Universal Auto Release — Freeing-the-Lang v4.13 (#10)"
 
 on:
   push:
@@ -10,52 +10,55 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: universal-release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: "Build — ${ { matrix.os } }"
-    runs-on: ${ { matrix.os } }
+    name: "Build — ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      # ---------------------------------------------------
-      # 0) CHECKOUT
-      # ---------------------------------------------------
-      - name: Checkout
+      # ------------------------------------------
+      # 1) CHECKOUT + SUBMODULE AUTO-LOAD
+      # ------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      # ---------------------------------------------------
-      # 1) OPTIONAL LOAD: Sponge-lang
-      # ---------------------------------------------------
-      - name: Clone Sponge-lang
-        shell: bash
+      # ------------------------------------------
+      # 2) AUTO clone Sponge-lang (MetaVM)
+      # ------------------------------------------
+      - name: Auto load Sponge-lang (MetaVM)
         run: |
-          git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
+          if [ ! -d "Sponge-lang" ]; then
+            echo "[AUTO] Cloning Sponge-lang..."
+            git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
+          fi
 
-      # ---------------------------------------------------
-      # 2) Install Rust
-      # ---------------------------------------------------
-      - name: Install Rust
+      # ------------------------------------------
+      # 3) AUTO detect Rust
+      # ------------------------------------------
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        if: exists('Cargo.toml')
 
-      # ---------------------------------------------------
-      # 3) Install Build Tools
-      # ---------------------------------------------------
-      - name: Install tools (Linux)
+      # ------------------------------------------
+      # 4) Install C/C++ Toolchain
+      # ------------------------------------------
+      - name: Install build tools (Ubuntu)
         if: runner.os == 'Linux'
-        shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake llvm clang nasm
+          sudo apt-get install -y build-essential cmake nasm || true
 
-      - name: Install tools (macOS)
+      - name: Install build tools (macOS)
         if: runner.os == 'macOS'
-        shell: bash
         run: |
           brew install llvm cmake nasm || true
 
@@ -63,102 +66,92 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # ---------------------------------------------------
-      # 4) UNIVERSAL BUILD DETECT
-      # ---------------------------------------------------
-      - name: Universal Build
-        shell: bash
+      # ------------------------------------------
+      # 5) BUILD C++ MetaVM (if exists)
+      # ------------------------------------------
+      - name: Build Sponge-lang MetaVM
         run: |
-          echo "🔍 Detecting project type…"
-
-          if [ -f Cargo.toml ]; then
-            echo "🦀 Rust project detected"
-            cargo build --release || true
-          fi
-
-          if [ -f CMakeLists.txt ]; then
-            echo "🛠 CMake project detected"
+          if [ -d "Sponge-lang" ]; then
+            cd Sponge-lang
             mkdir -p build
             cd build
             cmake ..
-            cmake --build . --config Release || true
-            cd ..
+            cmake --build . --config Release
+          else
+            echo "[WARN] Sponge-lang not found, skipping MetaVM build"
           fi
 
-          if [ -f build.sh ]; then
-            echo "📜 build.sh detected"
-            bash build.sh || true
+      # ------------------------------------------
+      # 6) BUILD Rust Runtime (if exists)
+      # ------------------------------------------
+      - name: Build Rust Runtime
+        if: exists('Cargo.toml')
+        run: cargo build --release
+
+      # ------------------------------------------
+      # 7) BUILD C/C++ project if CMake exists
+      # ------------------------------------------
+      - name: Build Local C++ (Auto-detect)
+        run: |
+          if [ -f "CMakeLists.txt" ]; then
+            mkdir -p local_build
+            cd local_build
+            cmake ..
+            cmake --build . --config Release
+          else
+            echo "[INFO] No local C++ project detected"
           fi
 
-      # ---------------------------------------------------
-      # 5) PACKAGING
-      # ---------------------------------------------------
-      - name: Prepare Release Bundle
-        shell: bash
+      # ------------------------------------------
+      # 8) PACKAGE Release Bundle
+      # ------------------------------------------
+      - name: Build release bundle
         run: |
           mkdir -p release-bundle
 
-          if [ -d target/release ]; then
-            cp -r target/release/* release-bundle/ 2>/dev/null || true
+          # Rust
+          if [ -f "target/release/${{ github.repository_owner }}" ]; then
+            cp target/release/* release-bundle/ || true
           fi
+          cp target/release/* release-bundle/ 2>/dev/null || true
 
-          if [ -d build ]; then
-            cp -r build release-bundle/build || true
-          fi
-
-          if [ -d Sponge-lang/build ]; then
+          # MetaVM
+          if [ -d "Sponge-lang/build" ]; then
             cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
           fi
 
-      # ---------------------------------------------------
-      # 6) PROOFLEDGER v2
-      # ---------------------------------------------------
-      - name: ProofLedger v2
-        shell: bash
-        run: |
-          echo "Generating ProofLedger…"
-
-          FILECOUNT=$(ls -1 release-bundle | wc -l)
-          TOTALSIZE=$(du -sh release-bundle | cut -f1)
-
-          echo "Repository: $GITHUB_REPOSITORY" > release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Commit: $GITHUB_SHA" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Build-Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "File-Count: $FILECOUNT" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Artifact-Size: $TOTALSIZE" >> release-bundle/proofledger-${{ matrix.os }}.txt
-
-          echo "" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "SHA256 Tree:" >> release-bundle/proofledger-${{ matrix.os }}.txt
-
-          for f in $(ls release-bundle); do
-            sha256sum release-bundle/$f >> release-bundle/proofledger-${{ matrix.os }}.txt 2>/dev/null || true
-          done
-
-      # ---------------------------------------------------
-      # 7) ZIP — 3OS Perfect
-      # ---------------------------------------------------
-      - name: Create ZIP
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" == "Windows" ]; then
-            echo "📦 Windows: Using PowerShell Compress-Archive"
-            powershell.exe -Command "Compress-Archive -Path release-bundle\\* -DestinationPath release-bundle\\FREELANG-${{ matrix.os }}.zip"
-          else
-            echo "📦 Linux/macOS: Using zip"
-            cd release-bundle
-            zip -r FREELANG-${{ matrix.os }}.zip ./*
+          # Local C/C++
+          if [ -d "local_build" ]; then
+            cp -r local_build release-bundle/local_cpp_build || true
           fi
 
-      # ---------------------------------------------------
-      # 8) SAFE RELEASE UPLOAD
-      # ---------------------------------------------------
+      # ------------------------------------------
+      # 9) PROOFLEDGER
+      # ------------------------------------------
+      - name: ProofLedger
+        run: |
+          echo "Freeing-the-Lang Universal Auto Release v4.13 (#10)" > release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Repo: $GITHUB_REPOSITORY" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Commit: $GITHUB_SHA" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
+
+      # ------------------------------------------
+      # 10) ZIP PACKAGING
+      # ------------------------------------------
+      - name: Make zip
+        run: |
+          cd release-bundle
+          zip -r FTL-${{ matrix.os }}.zip ./*
+
+      # ------------------------------------------
+      # 11) Release Upload
+      # ------------------------------------------
       - name: Upload Release Assets
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-bundle/FREELANG-${{ matrix.os }}.zip
+            release-bundle/FTL-${{ matrix.os }}.zip
             release-bundle/proofledger-${{ matrix.os }}.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
