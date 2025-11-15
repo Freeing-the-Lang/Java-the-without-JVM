@@ -1,4 +1,4 @@
-name: "Universal Auto Release — Freeing-the-Lang v4.15 (Auto Tag)"
+name: "Universal Auto Release — Freeing-the-Lang v4.15.1 (Auto Tag Fix)"
 
 on:
   push:
@@ -13,6 +13,7 @@ concurrency:
   group: universal-release-${{ github.ref }}
   cancel-in-progress: true
 
+
 jobs:
   build:
     name: "Build — ${{ matrix.os }}"
@@ -23,30 +24,38 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      # -----------------------------
-      # 1) Checkout
-      # -----------------------------
+      # ------------------------------------------
+      # 1) CHECKOUT
+      # ------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # -----------------------------
-      # 2) Auto Generate Tag if none exists
-      # -----------------------------
+      # ------------------------------------------
+      # 2) Auto Create Tag
+      # ------------------------------------------
       - name: Auto Create Tag
         id: autotag
         shell: bash
         run: |
           TAG="v$(date +'%Y%m%d%H%M%S')"
           echo "Generated Tag: $TAG"
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
           git tag $TAG
           git push origin $TAG
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
 
-      # -----------------------------
-      # 3) Clone Sponge-lang (bash for all OS)
-      # -----------------------------
+      # ------------------------------------------
+      # 3) Sync tag for softprops
+      # ------------------------------------------
+      - name: Fetch tags after push
+        run: git fetch --tags
+
+      # ------------------------------------------
+      # 4) Clone Sponge-lang
+      # ------------------------------------------
       - name: Clone Sponge-lang
         shell: bash
         run: |
@@ -54,16 +63,16 @@ jobs:
             git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
           fi
 
-      # -----------------------------
-      # 4) Install Rust if project has Cargo.toml
-      # -----------------------------
+      # ------------------------------------------
+      # 5) Install Rust
+      # ------------------------------------------
       - name: Install Rust
         if: ${{ hashFiles('Cargo.toml') != '' }}
         uses: dtolnay/rust-toolchain@stable
 
-      # -----------------------------
-      # 5) Install C/C++ Tools
-      # -----------------------------
+      # ------------------------------------------
+      # 6) Install C/C++
+      # ------------------------------------------
       - name: Install tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -79,9 +88,9 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # -----------------------------
-      # 6) Build Sponge-lang MetaVM
-      # -----------------------------
+      # ------------------------------------------
+      # 7) Build Sponge-lang MetaVM
+      # ------------------------------------------
       - name: Build Sponge-lang MetaVM
         shell: bash
         run: |
@@ -91,22 +100,19 @@ jobs:
             cd build
             cmake ..
             cmake --build . --config Release
-          else
-            echo "[WARN] Sponge-lang not found; skipping"
           fi
 
-      # -----------------------------
-      # 7) Build Rust Runtime
-      # -----------------------------
+      # ------------------------------------------
+      # 8) Build Rust
+      # ------------------------------------------
       - name: Build Rust Runtime
         if: ${{ hashFiles('Cargo.toml') != '' }}
         shell: bash
-        run: |
-          cargo build --release
+        run: cargo build --release
 
-      # -----------------------------
-      # 8) Bundle packaging
-      # -----------------------------
+      # ------------------------------------------
+      # 9) Bundle Packaging
+      # ------------------------------------------
       - name: Prepare Release Bundle
         shell: bash
         run: |
@@ -114,36 +120,36 @@ jobs:
           cp -r Sponge-lang/build release-bundle/sponge_meta_vm 2>/dev/null || true
           cp target/release/* release-bundle/ 2>/dev/null || true
 
-      # -----------------------------
-      # 9) ProofLedger
-      # -----------------------------
-      - name: ProofLedger
+      # ------------------------------------------
+      # 10) ProofLedger
+      # ------------------------------------------
+      - name: Generate ProofLedger
         shell: bash
         run: |
           f="release-bundle/proofledger-${{ matrix.os }}.txt"
-          echo "Freeing-the-Lang Universal Auto Release v4.15" > $f
+          echo "Universal Auto Release — Freeing-the-Lang v4.15.1" > $f
           echo "Repo: $GITHUB_REPOSITORY" >> $f
-          echo "Tag: ${{ steps.autotag.outputs.tag }}" >> $f
+          echo "Tag: ${{ steps.autotag.outputs.tag_name }}" >> $f
           echo "Commit: $GITHUB_SHA" >> $f
           echo "OS: ${{ matrix.os }}" >> $f
           echo "Build: $(date)" >> $f
 
-      # -----------------------------
-      # 10) Make zip
-      # -----------------------------
+      # ------------------------------------------
+      # 11) Zip
+      # ------------------------------------------
       - name: Make ZIP
         shell: bash
         run: |
           cd release-bundle
           zip -r FTL-${{ matrix.os }}.zip ./*
 
-      # -----------------------------
-      # 11) Upload Release
-      # -----------------------------
-      - name: Upload Release Assets
+      # ------------------------------------------
+      # 12) Upload Release
+      # ------------------------------------------
+      - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
-          tag: ${{ steps.autotag.outputs.tag }}
+          tag_name: ${{ steps.autotag.outputs.tag_name }}
           files: |
             release-bundle/FTL-${{ matrix.os }}.zip
             release-bundle/proofledger-${{ matrix.os }}.txt
