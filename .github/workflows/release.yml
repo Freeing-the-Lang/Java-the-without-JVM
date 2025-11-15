@@ -1,4 +1,4 @@
-name: "Java-the-without-JVM — Auto Release (Sponge-lang + Rust)"
+name: "Java-the-without-JVM — Auto Release (Auto Load Sponge-lang)"
 
 on:
   push:
@@ -23,30 +23,35 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      # -----------------------------
-      #   1) CHECKOUT + SUBMODULES
-      # -----------------------------
+      # ----------------------------------------
+      # 1) CHECKOUT
+      # ----------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive   # ★ Sponge-lang 폴더 자동 로드
 
-      # -----------------------------
-      #   2) RUST TOOLCHAIN
-      # -----------------------------
+      # ----------------------------------------
+      # 2) AUTO-DOWNLOAD Sponge-lang (NO submodule needed)
+      # ----------------------------------------
+      - name: Clone Sponge-lang
+        run: |
+          git clone https://github.com/Freeing-the-Lang/Sponge-lang.git
+
+      # ----------------------------------------
+      # 3) RUST TOOLCHAIN
+      # ----------------------------------------
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # -----------------------------
-      #   3) C++ TOOLCHAIN
-      # -----------------------------
-      - name: Install C++ tools (Ubuntu)
+      # ----------------------------------------
+      # 4) C++ TOOLCHAIN
+      # ----------------------------------------
+      - name: Install tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake nasm
 
-      - name: Install C++ tools (macOS)
+      - name: Install tools (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install llvm cmake nasm || true
@@ -55,10 +60,9 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-
-      # -----------------------------
-      #   4) BUILD C++ Sponge MetaVM
-      # -----------------------------
+      # ----------------------------------------
+      # 5) BUILD C++ Sponge MetaVM
+      # ----------------------------------------
       - name: Build Sponge-lang MetaVM
         run: |
           cd Sponge-lang
@@ -67,31 +71,24 @@ jobs:
           cmake ..
           cmake --build . --config Release
 
-
-      # -----------------------------
-      #   5) BUILD RUST RUNTIME
-      # -----------------------------
-      - name: Build Rust Meaning Runtime
+      # ----------------------------------------
+      # 6) BUILD RUST RUNTIME
+      # ----------------------------------------
+      - name: Build Rust Runtime
         run: cargo build --release
 
-
-      # -----------------------------
-      #   6) PACKAGE RELEASE BUNDLE
-      # -----------------------------
+      # ----------------------------------------
+      # 7) PACKAGE DIST
+      # ----------------------------------------
       - name: Prepare Release Bundle
         run: |
           mkdir -p release-bundle
-
-          # Rust Native Runtime
           cp target/release/java-without-jvm release-bundle/ || true
-
-          # Sponge-lang MetaVM build output
           cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
 
-
-      # -----------------------------
-      #   7) PROOFLEDGER
-      # -----------------------------
+      # ----------------------------------------
+      # 8) PROOFLEDGER
+      # ----------------------------------------
       - name: Generate ProofLedger
         run: |
           echo "Repo: Java-the-without-JVM" > release-bundle/proofledger-${{ matrix.os }}.txt
@@ -99,24 +96,22 @@ jobs:
           echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
           echo "Build-Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
 
-
-      # -----------------------------
-      #   8) ZIP PACKAGING
-      # -----------------------------
+      # ----------------------------------------
+      # 9) ZIP PACKAGING
+      # ----------------------------------------
       - name: Make ZIP
         run: |
           cd release-bundle
-          zip -r java-the-without-jvm-${{ matrix.os }}.zip ./*
+          zip -r java-without-jvm-${{ matrix.os }}.zip ./*
 
-
-      # -----------------------------
-      #   9) UPLOAD RELEASE ARTIFACTS
-      # -----------------------------
+      # ----------------------------------------
+      # 10) AUTO RELEASE UPLOAD
+      # ----------------------------------------
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-bundle/java-the-without-jvm-${{ matrix.os }}.zip
+            release-bundle/java-without-jvm-${{ matrix.os }}.zip
             release-bundle/proofledger-${{ matrix.os }}.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
