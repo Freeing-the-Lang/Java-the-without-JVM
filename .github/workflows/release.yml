@@ -1,4 +1,4 @@
-name: "Java-the-without-JVM — Auto Release 3OS Build"
+name: "Java-the-without-JVM — Auto Release (Sponge MetaVM + Rust)"
 
 on:
   push:
@@ -10,11 +10,11 @@ permissions:
   contents: write
 
 concurrency:
-  group: auto-release-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  build-3os:
+  build:
     name: "Build — ${{ matrix.os }}"
     runs-on: ${{ matrix.os }}
 
@@ -23,86 +23,94 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      - name: Checkout
+      # -----------------------------
+      #    CHECKOUT + SUBMODULE
+      # -----------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive     # ★ cpp-meta-programming-language 불러오기
 
-      # -----------------------
-      #    Rust Install
-      # -----------------------
+      # -----------------------------
+      #    RUST TOOLCHAIN
+      # -----------------------------
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # -----------------------
-      #   C++ Toolchains
-      # -----------------------
-      - name: Install build tools (Ubuntu)
+      # -----------------------------
+      #    C++ TOOLCHAIN
+      # -----------------------------
+      - name: Install C++ tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake
+          sudo apt-get install -y build-essential cmake nasm
 
-      - name: Install build tools (macOS)
+      - name: Install C++ tools (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install llvm cmake || true
+          brew install llvm cmake nasm || true
 
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-
-      # -----------------------
-      #     Sponge-lang VM
-      # -----------------------
-      - name: Load Sponge-lang
+      # -----------------------------
+      #    BUILD C++ MetaVM (cpp-meta-programming-language)
+      # -----------------------------
+      - name: Build Sponge MetaVM (C++ Meta Programming Engine)
         run: |
-          git submodule update --init --recursive || echo "no submodule"
+          cd sponge      # ★ cpp-meta-programming-language 디렉토리
+          mkdir -p build
+          cd build
+          cmake ..
+          cmake --build . --config Release
 
-      - name: Build Sponge-lang MetaVM
-        run: |
-          mkdir -p sponge_build
-          cd sponge_build
-          cmake ../sponge || true
-          cmake --build . --config Release || true
-
-
-      # -----------------------
-      #     Rust Runtime
-      # -----------------------
+      # -----------------------------
+      #    BUILD RUST MEANING RUNTIME
+      # -----------------------------
       - name: Build Rust Meaning Runtime
         run: cargo build --release
 
-
-      # -----------------------
-      #    DIST Packaging
-      # -----------------------
+      # -----------------------------
+      #    PACKAGE DIST FILES
+      # -----------------------------
       - name: Prepare Release Bundle
         run: |
           mkdir -p release-bundle
-          cp target/release/java-without-jvm release-bundle/ || true
-          cp -r sponge_build release-bundle/sponge_vm || true
 
+          # Rust Runtime
+          cp target/release/java-without-jvm release-bundle/ || true
+
+          # C++ MetaVM
+          cp -r sponge/build release-bundle/sponge_meta_vm || true
+
+      # -----------------------------
+      #    PROOFLEDGER
+      # -----------------------------
       - name: Generate ProofLedger
         run: |
           echo "Repo: Java-the-without-JVM" > release-bundle/proofledger-${{ matrix.os }}.txt
           echo "Commit: $GITHUB_SHA" >> release-bundle/proofledger-${{ matrix.os }}.txt
           echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Build-Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
 
+      # -----------------------------
+      #    ZIP PACKAGING
+      # -----------------------------
       - name: Make ZIP
         run: |
           cd release-bundle
-          zip -r java-without-jvm-${{ matrix.os }}.zip ./*
+          zip -r java-the-without-jvm-${{ matrix.os }}.zip ./*
 
-
-      # -----------------------
-      #   Upload Release (per OS)
-      # -----------------------
-      - name: Upload to Release
+      # -----------------------------
+      #    AUTO RELEASE UPLOAD
+      # -----------------------------
+      - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-bundle/java-without-jvm-${{ matrix.os }}.zip
+            release-bundle/java-the-without-jvm-${{ matrix.os }}.zip
             release-bundle/proofledger-${{ matrix.os }}.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
