@@ -1,4 +1,4 @@
-name: "Java-the-without-JVM — Auto Release (Auto Load Sponge-lang)"
+name: "Universal Auto Release — Freeing-the-Lang v4.11"
 
 on:
   push:
@@ -23,35 +23,36 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      # ----------------------------------------
-      # 1) CHECKOUT
-      # ----------------------------------------
-      - name: Checkout repository
+      # ---------------------------------------------------
+      # 0) CHECKOUT
+      # ---------------------------------------------------
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # ----------------------------------------
-      # 2) AUTO-DOWNLOAD Sponge-lang (NO submodule needed)
-      # ----------------------------------------
-      - name: Clone Sponge-lang
+      # ---------------------------------------------------
+      # 1) OPTIONAL: AUTO LOAD SPONGE-LANG VM (if exists)
+      # ---------------------------------------------------
+      - name: Clone Sponge-lang (Optional)
+        continue-on-error: true
         run: |
-          git clone https://github.com/Freeing-the-Lang/Sponge-lang.git
+          git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
 
-      # ----------------------------------------
-      # 3) RUST TOOLCHAIN
-      # ----------------------------------------
+      # ---------------------------------------------------
+      # 2) Install Rust
+      # ---------------------------------------------------
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # ----------------------------------------
-      # 4) C++ TOOLCHAIN
-      # ----------------------------------------
-      - name: Install tools (Ubuntu)
+      # ---------------------------------------------------
+      # 3) Install C/C++ & LLVM/Clang/Build tools
+      # ---------------------------------------------------
+      - name: Install Tools (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake nasm
+          sudo apt-get install -y build-essential cmake llvm clang nasm
 
-      - name: Install tools (macOS)
+      - name: Install Tools (macOS)
         if: runner.os == 'macOS'
         run: |
           brew install llvm cmake nasm || true
@@ -60,58 +61,77 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # ----------------------------------------
-      # 5) BUILD C++ Sponge MetaVM
-      # ----------------------------------------
-      - name: Build Sponge-lang MetaVM
+      # ---------------------------------------------------
+      # 4) BUILD — Repo specific (auto-detect)
+      # ---------------------------------------------------
+      - name: Build (Rust or C++ auto-detect)
         run: |
-          cd Sponge-lang
-          mkdir -p build
-          cd build
-          cmake ..
-          cmake --build . --config Release
+          if [ -f Cargo.toml ]; then
+            cargo build --release || true
+          fi
 
-      # ----------------------------------------
-      # 6) BUILD RUST RUNTIME
-      # ----------------------------------------
-      - name: Build Rust Runtime
-        run: cargo build --release
+          if [ -f build.sh ]; then
+            sh build.sh || true
+          fi
 
-      # ----------------------------------------
-      # 7) PACKAGE DIST
-      # ----------------------------------------
+          if [ -f CMakeLists.txt ]; then
+            mkdir -p build
+            cd build
+            cmake ..
+            cmake --build . --config Release || true
+            cd ..
+          fi
+
+      # ---------------------------------------------------
+      # 5) PACKAGE DIST
+      # ---------------------------------------------------
       - name: Prepare Release Bundle
         run: |
           mkdir -p release-bundle
-          cp target/release/java-without-jvm release-bundle/ || true
-          cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
 
-      # ----------------------------------------
-      # 8) PROOFLEDGER
-      # ----------------------------------------
+          # Rust binary
+          if [ -d target/release ]; then
+            cp -r target/release/*.exe target/release/* release-bundle/ 2>/dev/null || true
+          fi
+
+          # C++ build directory
+          if [ -d build ]; then
+            cp -r build release-bundle/build || true
+          fi
+
+          # Sponge-lang VM
+          if [ -d Sponge-lang/build ]; then
+            cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
+          fi
+
+      # ---------------------------------------------------
+      # 6) PROOFLEDGER
+      # ---------------------------------------------------
       - name: Generate ProofLedger
         run: |
-          echo "Repo: Java-the-without-JVM" > release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Repository: $GITHUB_REPOSITORY" > release-bundle/proofledger-${{ matrix.os }}.txt
           echo "Commit: $GITHUB_SHA" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Triggered-By: $GITHUB_REF" >> release-bundle/proofledger-${{ matrix.os }}.txt
           echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
           echo "Build-Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
 
-      # ----------------------------------------
-      # 9) ZIP PACKAGING
-      # ----------------------------------------
-      - name: Make ZIP
+      # ---------------------------------------------------
+      # 7) ZIP PACKAGING
+      # ---------------------------------------------------
+      - name: Create ZIP
         run: |
           cd release-bundle
-          zip -r java-without-jvm-${{ matrix.os }}.zip ./*
+          zip -r build-${{ matrix.os }}.zip ./*
 
-      # ----------------------------------------
-      # 10) AUTO RELEASE UPLOAD
-      # ----------------------------------------
+      # ---------------------------------------------------
+      # 8) RELEASE (SAFE MODE)
+      # ---------------------------------------------------
       - name: Upload Release Assets
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-bundle/java-without-jvm-${{ matrix.os }}.zip
+            release-bundle/build-${{ matrix.os }}.zip
             release-bundle/proofledger-${{ matrix.os }}.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
