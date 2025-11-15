@@ -1,0 +1,108 @@
+name: "Java-the-without-JVM — Auto Release 3OS Build"
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-3os:
+    name: "Build — ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # -----------------------
+      #    Rust Install
+      # -----------------------
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # -----------------------
+      #   C++ Toolchains
+      # -----------------------
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake
+
+      - name: Install build tools (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm cmake || true
+
+      - name: Setup MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+
+      # -----------------------
+      #     Sponge-lang VM
+      # -----------------------
+      - name: Load Sponge-lang
+        run: |
+          git submodule update --init --recursive || echo "no submodule"
+
+      - name: Build Sponge-lang MetaVM
+        run: |
+          mkdir -p sponge_build
+          cd sponge_build
+          cmake ../sponge || true
+          cmake --build . --config Release || true
+
+
+      # -----------------------
+      #     Rust Runtime
+      # -----------------------
+      - name: Build Rust Meaning Runtime
+        run: cargo build --release
+
+
+      # -----------------------
+      #    DIST Packaging
+      # -----------------------
+      - name: Prepare Release Bundle
+        run: |
+          mkdir -p release-bundle
+          cp target/release/java-without-jvm release-bundle/ || true
+          cp -r sponge_build release-bundle/sponge_vm || true
+
+      - name: Generate ProofLedger
+        run: |
+          echo "Repo: Java-the-without-JVM" > release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Commit: $GITHUB_SHA" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          echo "Build-Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
+
+      - name: Make ZIP
+        run: |
+          cd release-bundle
+          zip -r java-without-jvm-${{ matrix.os }}.zip ./*
+
+
+      # -----------------------
+      #   Upload Release (per OS)
+      # -----------------------
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-bundle/java-without-jvm-${{ matrix.os }}.zip
+            release-bundle/proofledger-${{ matrix.os }}.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
