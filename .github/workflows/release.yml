@@ -1,9 +1,9 @@
-name: "Universal Auto Release — Freeing-the-Lang v4.14 (Stable)"
+name: "Universal Auto Release — Freeing-the-Lang v4.15 (Auto Tag)"
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -23,35 +23,47 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
-      # ------------------------------------------
-      # 1) CHECKOUT
-      # ------------------------------------------
+      # -----------------------------
+      # 1) Checkout
+      # -----------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      # ------------------------------------------
-      # 2) Auto Clone Sponge-lang (bash for ALL OS)
-      # ------------------------------------------
+      # -----------------------------
+      # 2) Auto Generate Tag if none exists
+      # -----------------------------
+      - name: Auto Create Tag
+        id: autotag
+        shell: bash
+        run: |
+          TAG="v$(date +'%Y%m%d%H%M%S')"
+          echo "Generated Tag: $TAG"
+          git tag $TAG
+          git push origin $TAG
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      # -----------------------------
+      # 3) Clone Sponge-lang (bash for all OS)
+      # -----------------------------
       - name: Clone Sponge-lang
         shell: bash
         run: |
           if [ ! -d "Sponge-lang" ]; then
-            echo "[AUTO] Cloning Sponge-lang..."
             git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
           fi
 
-      # ------------------------------------------
-      # 3) Install Rust toolchain (only if exists)
-      # ------------------------------------------
+      # -----------------------------
+      # 4) Install Rust if project has Cargo.toml
+      # -----------------------------
       - name: Install Rust
         if: ${{ hashFiles('Cargo.toml') != '' }}
         uses: dtolnay/rust-toolchain@stable
 
-      # ------------------------------------------
-      # 4) Install C/C++ Toolchain
-      # ------------------------------------------
+      # -----------------------------
+      # 5) Install C/C++ Tools
+      # -----------------------------
       - name: Install tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -67,9 +79,9 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      # ------------------------------------------
-      # 5) Build Sponge-lang MetaVM
-      # ------------------------------------------
+      # -----------------------------
+      # 6) Build Sponge-lang MetaVM
+      # -----------------------------
       - name: Build Sponge-lang MetaVM
         shell: bash
         run: |
@@ -80,65 +92,58 @@ jobs:
             cmake ..
             cmake --build . --config Release
           else
-            echo "[WARN] Sponge-lang not found; skip"
+            echo "[WARN] Sponge-lang not found; skipping"
           fi
 
-      # ------------------------------------------
-      # 6) Build Rust Runtime if project is Rust
-      # ------------------------------------------
+      # -----------------------------
+      # 7) Build Rust Runtime
+      # -----------------------------
       - name: Build Rust Runtime
         if: ${{ hashFiles('Cargo.toml') != '' }}
         shell: bash
         run: |
-          echo "[RUST] Found Cargo.toml, building..."
           cargo build --release
 
-      # ------------------------------------------
-      # 7) Package Release Bundle
-      # ------------------------------------------
+      # -----------------------------
+      # 8) Bundle packaging
+      # -----------------------------
       - name: Prepare Release Bundle
         shell: bash
         run: |
           mkdir -p release-bundle
+          cp -r Sponge-lang/build release-bundle/sponge_meta_vm 2>/dev/null || true
+          cp target/release/* release-bundle/ 2>/dev/null || true
 
-          # Rust artifacts
-          if [ -d "target/release" ]; then
-            cp target/release/* release-bundle/ 2>/dev/null || true
-          fi
-
-          # Sponge MetaVM build
-          if [ -d "Sponge-lang/build" ]; then
-            cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
-          fi
-
-      # ------------------------------------------
-      # 8) ProofLedger
-      # ------------------------------------------
-      - name: Generate ProofLedger
+      # -----------------------------
+      # 9) ProofLedger
+      # -----------------------------
+      - name: ProofLedger
         shell: bash
         run: |
           f="release-bundle/proofledger-${{ matrix.os }}.txt"
-          echo "Freeing-the-Lang Universal Auto Release v4.14" > $f
+          echo "Freeing-the-Lang Universal Auto Release v4.15" > $f
           echo "Repo: $GITHUB_REPOSITORY" >> $f
+          echo "Tag: ${{ steps.autotag.outputs.tag }}" >> $f
           echo "Commit: $GITHUB_SHA" >> $f
           echo "OS: ${{ matrix.os }}" >> $f
           echo "Build: $(date)" >> $f
 
-      # ------------------------------------------
-      # 9) ZIP packaging
-      # ------------------------------------------
+      # -----------------------------
+      # 10) Make zip
+      # -----------------------------
       - name: Make ZIP
         shell: bash
         run: |
           cd release-bundle
           zip -r FTL-${{ matrix.os }}.zip ./*
 
-      # ------------------------------------------
-      # 10) Release Upload (always last)
-      # ------------------------------------------
+      # -----------------------------
+      # 11) Upload Release
+      # -----------------------------
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
+          tag: ${{ steps.autotag.outputs.tag }}
           files: |
             release-bundle/FTL-${{ matrix.os }}.zip
             release-bundle/proofledger-${{ matrix.os }}.txt
