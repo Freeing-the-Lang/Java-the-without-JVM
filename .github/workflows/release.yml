@@ -1,4 +1,4 @@
-name: "Universal Auto Release — Freeing-the-Lang v4.11"
+name: "Universal Auto Release — Freeing-the-Lang v4.12"
 
 on:
   push:
@@ -30,10 +30,10 @@ jobs:
         uses: actions/checkout@v4
 
       # ---------------------------------------------------
-      # 1) OPTIONAL: AUTO LOAD SPONGE-LANG VM (if exists)
+      # 1) OPTIONAL: AUTO LOAD SPONGE-LANG
       # ---------------------------------------------------
-      - name: Clone Sponge-lang (Optional)
-        continue-on-error: true
+      - name: Clone Sponge-lang
+        shell: bash
         run: |
           git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
 
@@ -44,16 +44,18 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # ---------------------------------------------------
-      # 3) Install C/C++ & LLVM/Clang/Build tools
+      # 3) Install Tools
       # ---------------------------------------------------
-      - name: Install Tools (Linux)
+      - name: Install tools (Linux)
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake llvm clang nasm
 
-      - name: Install Tools (macOS)
+      - name: Install tools (macOS)
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           brew install llvm cmake nasm || true
 
@@ -62,19 +64,22 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       # ---------------------------------------------------
-      # 4) BUILD — Repo specific (auto-detect)
+      # 4) UNIVERSAL BUILD (Rust / C++ / CMake / Custom)
       # ---------------------------------------------------
-      - name: Build (Rust or C++ auto-detect)
+      - name: Universal Build
+        shell: bash
         run: |
+          echo "🔍 Detecting project type..."
+
+          # Rust build
           if [ -f Cargo.toml ]; then
+            echo "🦀 Rust project detected"
             cargo build --release || true
           fi
 
-          if [ -f build.sh ]; then
-            sh build.sh || true
-          fi
-
+          # CMake build
           if [ -f CMakeLists.txt ]; then
+            echo "🛠  CMake project detected"
             mkdir -p build
             cd build
             cmake ..
@@ -82,19 +87,26 @@ jobs:
             cd ..
           fi
 
+          # Custom build script
+          if [ -f build.sh ]; then
+            echo "📜 Running custom build.sh"
+            bash build.sh || true
+          fi
+
       # ---------------------------------------------------
       # 5) PACKAGE DIST
       # ---------------------------------------------------
       - name: Prepare Release Bundle
+        shell: bash
         run: |
           mkdir -p release-bundle
 
           # Rust binary
           if [ -d target/release ]; then
-            cp -r target/release/*.exe target/release/* release-bundle/ 2>/dev/null || true
+            cp -r target/release/* release-bundle/ 2>/dev/null || true
           fi
 
-          # C++ build directory
+          # CMake output
           if [ -d build ]; then
             cp -r build release-bundle/build || true
           fi
@@ -108,23 +120,27 @@ jobs:
       # 6) PROOFLEDGER
       # ---------------------------------------------------
       - name: Generate ProofLedger
+        shell: bash
         run: |
-          echo "Repository: $GITHUB_REPOSITORY" > release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Commit: $GITHUB_SHA" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Triggered-By: $GITHUB_REF" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Build-Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          {
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Commit: $GITHUB_SHA"
+            echo "OS: ${{ matrix.os }}"
+            echo "Triggered-By: $GITHUB_REF"
+            echo "Build-Date: $(date)"
+          } > release-bundle/proofledger-${{ matrix.os }}.txt
 
       # ---------------------------------------------------
-      # 7) ZIP PACKAGING
+      # 7) ZIP
       # ---------------------------------------------------
       - name: Create ZIP
+        shell: bash
         run: |
           cd release-bundle
           zip -r build-${{ matrix.os }}.zip ./*
 
       # ---------------------------------------------------
-      # 8) RELEASE (SAFE MODE)
+      # 8) SAFE RELEASE UPLOAD
       # ---------------------------------------------------
       - name: Upload Release Assets
         if: startsWith(github.ref, 'refs/tags/')
