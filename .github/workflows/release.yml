@@ -1,9 +1,9 @@
-name: "Universal Auto Release — Freeing-the-Lang v4.14"
+name: "Auto Tag + Auto Release — Freeing-the-Lang v5.0"
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -14,8 +14,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  auto-tag:
+    name: "Generate Auto Tag"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ---------------------------
+      # 1) Auto Tag Generator
+      # ---------------------------
+      - name: Create Auto Tag
+        id: tagger
+        shell: bash
+        run: |
+          # 날짜 기반 + short SHA
+          DATE=$(date +'%Y%m%d-%H%M%S')
+          SHORTSHA=$(git rev-parse --short HEAD)
+          TAG="v${DATE}-${SHORTSHA}"
+
+          echo "Generated TAG: $TAG"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+          git tag $TAG
+          git push origin $TAG
+
   build:
-    name: "Build — ${{ matrix.os }}"
+    name: "Build & Release — ${{ matrix.os }}"
+    needs: auto-tag
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -24,13 +53,19 @@ jobs:
 
     steps:
       # ---------------------------------------------------
-      # 0) CHECKOUT
+      # CHECKOUT (with tags)
       # ---------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch Tags
+        run: |
+          git fetch --tags
 
       # ---------------------------------------------------
-      # 1) OPTIONAL LOAD: Sponge-lang (no fail)
+      # SPONGE-LANG (optional)
       # ---------------------------------------------------
       - name: Clone Sponge-lang
         shell: bash
@@ -38,13 +73,13 @@ jobs:
           git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
 
       # ---------------------------------------------------
-      # 2) Install Rust
+      # Rust install
       # ---------------------------------------------------
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
       # ---------------------------------------------------
-      # 3) Install Build Tools
+      # Tools install
       # ---------------------------------------------------
       - name: Install tools (Linux)
         if: runner.os == 'Linux'
@@ -64,22 +99,20 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
 
       # ---------------------------------------------------
-      # 4) UNIVERSAL BUILD DETECT (Rust / CMake / build.sh)
+      # UNIVERSAL BUILD
       # ---------------------------------------------------
-      - name: Universal Build
+      - name: Build
         shell: bash
         run: |
-          echo "🔍 Detecting project type…"
+          echo "Detecting builder…"
 
-          # Rust
           if [ -f Cargo.toml ]; then
-            echo "🦀 Rust project detected"
+            echo "🦀 Rust build"
             cargo build --release || true
           fi
 
-          # CMake
           if [ -f CMakeLists.txt ]; then
-            echo "🛠 CMake project detected"
+            echo "🛠 CMake build"
             mkdir -p build
             cd build
             cmake ..
@@ -87,43 +120,37 @@ jobs:
             cd ..
           fi
 
-          # Custom script
           if [ -f build.sh ]; then
-            echo "📜 build.sh detected"
+            echo "📜 build.sh found"
             bash build.sh || true
           fi
 
       # ---------------------------------------------------
-      # 5) PACKAGING
+      # PACKAGE
       # ---------------------------------------------------
       - name: Prepare Release Bundle
         shell: bash
         run: |
           mkdir -p release-bundle
 
-          # Rust artifacts
           if [ -d target/release ]; then
             cp -r target/release/* release-bundle/ 2>/dev/null || true
           fi
 
-          # CMake output
           if [ -d build ]; then
             cp -r build release-bundle/build || true
           fi
 
-          # Sponge-lang VM
           if [ -d Sponge-lang/build ]; then
             cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
           fi
 
       # ---------------------------------------------------
-      # 6) PROOFLEDGER v2
+      # PROOFLEDGER v2
       # ---------------------------------------------------
-      - name: ProofLedger v2
+      - name: ProofLedger
         shell: bash
         run: |
-          echo "Generating ProofLedger…"
-
           FILECOUNT=$(ls -1 release-bundle | wc -l)
           TOTALSIZE=$(du -sh release-bundle | cut -f1)
 
@@ -131,7 +158,7 @@ jobs:
             echo "Repository: $GITHUB_REPOSITORY"
             echo "Commit: $GITHUB_SHA"
             echo "OS: ${{ matrix.os }}"
-            echo "Triggered-By: $GITHUB_REF"
+            echo "Tag: ${{ needs.auto-tag.outputs.tag }}"
             echo "Build-Date: $(date)"
             echo "File-Count: $FILECOUNT"
             echo "Artifact-Size: $TOTALSIZE"
@@ -144,7 +171,7 @@ jobs:
           done
 
       # ---------------------------------------------------
-      # 7) ZIP (Windows-safe + 3OS)
+      # ZIP (Windows-safe)
       # ---------------------------------------------------
       - name: Create ZIP
         shell: bash
@@ -152,21 +179,19 @@ jobs:
           OS="${{ runner.os }}"
 
           if [ "$OS" = "Windows" ]; then
-            echo "📦 Windows: Compress-Archive"
             powershell.exe -Command "Compress-Archive -Path release-bundle\\* -DestinationPath release-bundle\\FREELANG-${{ matrix.os }}.zip"
           else
-            echo "📦 Unix: zip"
             cd release-bundle
             zip -r FREELANG-${{ matrix.os }}.zip ./*
           fi
 
       # ---------------------------------------------------
-      # 8) SAFE RELEASE UPLOAD
+      # RELEASE UPLOAD — uses auto-created tag
       # ---------------------------------------------------
-      - name: Upload Release Assets
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.auto-tag.outputs.tag }}
           files: |
             release-bundle/FREELANG-${{ matrix.os }}.zip
             release-bundle/proofledger-${{ matrix.os }}.txt
