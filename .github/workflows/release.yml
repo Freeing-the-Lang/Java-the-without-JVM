@@ -1,4 +1,4 @@
-name: "Universal Auto Release — Freeing-the-Lang v4.13 (#10)"
+name: "Universal Auto Release — Freeing-the-Lang v4.14 (Stable)"
 
 on:
   push:
@@ -23,21 +23,35 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
+      # ------------------------------------------
+      # 1) CHECKOUT
+      # ------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
+      # ------------------------------------------
+      # 2) Auto Clone Sponge-lang (bash for ALL OS)
+      # ------------------------------------------
       - name: Clone Sponge-lang
+        shell: bash
         run: |
           if [ ! -d "Sponge-lang" ]; then
+            echo "[AUTO] Cloning Sponge-lang..."
             git clone https://github.com/Freeing-the-Lang/Sponge-lang.git || true
           fi
 
+      # ------------------------------------------
+      # 3) Install Rust toolchain (only if exists)
+      # ------------------------------------------
       - name: Install Rust
         if: ${{ hashFiles('Cargo.toml') != '' }}
         uses: dtolnay/rust-toolchain@stable
 
+      # ------------------------------------------
+      # 4) Install C/C++ Toolchain
+      # ------------------------------------------
       - name: Install tools (Ubuntu)
         if: runner.os == 'Linux'
         run: |
@@ -53,7 +67,11 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      # ------------------------------------------
+      # 5) Build Sponge-lang MetaVM
+      # ------------------------------------------
       - name: Build Sponge-lang MetaVM
+        shell: bash
         run: |
           if [ -d "Sponge-lang" ]; then
             cd Sponge-lang
@@ -61,31 +79,63 @@ jobs:
             cd build
             cmake ..
             cmake --build . --config Release
+          else
+            echo "[WARN] Sponge-lang not found; skip"
           fi
 
+      # ------------------------------------------
+      # 6) Build Rust Runtime if project is Rust
+      # ------------------------------------------
       - name: Build Rust Runtime
         if: ${{ hashFiles('Cargo.toml') != '' }}
-        run: cargo build --release
+        shell: bash
+        run: |
+          echo "[RUST] Found Cargo.toml, building..."
+          cargo build --release
 
+      # ------------------------------------------
+      # 7) Package Release Bundle
+      # ------------------------------------------
       - name: Prepare Release Bundle
+        shell: bash
         run: |
           mkdir -p release-bundle
-          cp target/release/* release-bundle/ 2>/dev/null || true
-          cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
 
-      - name: ProofLedger
+          # Rust artifacts
+          if [ -d "target/release" ]; then
+            cp target/release/* release-bundle/ 2>/dev/null || true
+          fi
+
+          # Sponge MetaVM build
+          if [ -d "Sponge-lang/build" ]; then
+            cp -r Sponge-lang/build release-bundle/sponge_meta_vm || true
+          fi
+
+      # ------------------------------------------
+      # 8) ProofLedger
+      # ------------------------------------------
+      - name: Generate ProofLedger
+        shell: bash
         run: |
-          echo "Universal Auto Release — Freeing-the-Lang v4.13 (#10)" > release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Repo: $GITHUB_REPOSITORY" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Commit: $GITHUB_SHA" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "OS: ${{ matrix.os }}" >> release-bundle/proofledger-${{ matrix.os }}.txt
-          echo "Date: $(date)" >> release-bundle/proofledger-${{ matrix.os }}.txt
+          f="release-bundle/proofledger-${{ matrix.os }}.txt"
+          echo "Freeing-the-Lang Universal Auto Release v4.14" > $f
+          echo "Repo: $GITHUB_REPOSITORY" >> $f
+          echo "Commit: $GITHUB_SHA" >> $f
+          echo "OS: ${{ matrix.os }}" >> $f
+          echo "Build: $(date)" >> $f
 
-      - name: Make zip
+      # ------------------------------------------
+      # 9) ZIP packaging
+      # ------------------------------------------
+      - name: Make ZIP
+        shell: bash
         run: |
           cd release-bundle
           zip -r FTL-${{ matrix.os }}.zip ./*
 
+      # ------------------------------------------
+      # 10) Release Upload (always last)
+      # ------------------------------------------
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
         with:
